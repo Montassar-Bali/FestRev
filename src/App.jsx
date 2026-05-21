@@ -6,6 +6,7 @@ import Header from './components/layout/Header';
 import Dashboard from './pages/Dashboard';
 import Tickets from './pages/Tickets';
 import Export from './pages/Export';
+import Import from './pages/Import';
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -16,6 +17,7 @@ function AnimatedRoutes() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/tickets" element={<Tickets />} />
         <Route path="/export" element={<Export />} />
+        <Route path="/admin" element={<Import />} />
       </Routes>
     </AnimatePresence>
   );

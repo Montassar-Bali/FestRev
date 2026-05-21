@@ -4,12 +4,14 @@ import {
   LayoutDashboard,
   Ticket,
   FileSpreadsheet,
+  ShieldCheck,
 } from 'lucide-react';
 
 const navItems = [
   { to: '/', label: 'Tableau de Bord', icon: LayoutDashboard },
   { to: '/tickets', label: 'Billets', icon: Ticket },
   { to: '/export', label: 'Exporter', icon: FileSpreadsheet },
+  { to: '/admin', label: 'Admin (CSV)', icon: ShieldCheck },
 ];
 
 const linkVariants = {

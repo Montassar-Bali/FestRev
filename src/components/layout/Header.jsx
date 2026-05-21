@@ -6,6 +6,7 @@ const routeTitles = {
   '/': 'Tableau de Bord',
   '/tickets': 'Billets',
   '/export': 'Exporter',
+  '/admin': 'Console Administrateur',
 };
 
 export default function Header({ onToggleSidebar }) {

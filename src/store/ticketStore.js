@@ -312,6 +312,33 @@ const useTicketStore = create((set, get) => ({
     await update(ref(db, `tickets/${id}`), { composte: currentVal === 1 ? 0 : 1 });
   },
 
+  // Bulk upload tickets in chunked updates
+  bulkUploadTickets: async (ticketsArray, deleteFirst, onProgress) => {
+    if (deleteFirst) {
+      await remove(ref(db, 'tickets'));
+    }
+
+    const CHUNK_SIZE = 400;
+    const total = ticketsArray.length;
+    let uploadedCount = 0;
+
+    for (let i = 0; i < total; i += CHUNK_SIZE) {
+      const chunk = ticketsArray.slice(i, i + CHUNK_SIZE);
+      const updates = {};
+
+      chunk.forEach((ticket) => {
+        updates[`tickets/${ticket.id}`] = ticket;
+      });
+
+      await update(ref(db), updates);
+      uploadedCount += chunk.length;
+
+      if (onProgress) {
+        onProgress(uploadedCount);
+      }
+    }
+  },
+
   // Stats calculation
   getStats: () => {
     const { tickets } = get();
