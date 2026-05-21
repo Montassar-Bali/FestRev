@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { ref, onValue, set, update, remove } from 'firebase/database';
 import { db } from '../lib/firebase';
-import { normalizeTicketForUI } from '../lib/csvParser';
+import { normalizeTicketForUI } from '../lib/excelParser';
 
 // Helper function to generate UUID
 function generateUUID() {

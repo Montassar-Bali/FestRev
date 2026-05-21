@@ -15,7 +15,7 @@ import {
   Database
 } from 'lucide-react';
 import { useTicketStore } from '../store/ticketStore';
-import { parseAndNormalizeCSV } from '../lib/csvParser';
+import { parseAndNormalizeExcel, normalizeTicketForUI } from '../lib/excelParser';
 import PageWrapper from '../components/layout/PageWrapper';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
@@ -75,9 +75,10 @@ export default function Import() {
   };
 
   // Handle parsing logic
-  const processFile = (selectedFile) => {
-    if (!selectedFile.name.endsWith('.csv')) {
-      setParseError('Le fichier doit être au format CSV (.csv uniquement).');
+  const processFile = async (selectedFile) => {
+    const isExcel = selectedFile.name.endsWith('.xlsx') || selectedFile.name.endsWith('.xls');
+    if (!isExcel) {
+      setParseError('Le fichier doit être au format Excel (.xlsx ou .xls uniquement).');
       setFile(null);
       setParsedData(null);
       return;
@@ -88,19 +89,14 @@ export default function Import() {
     setParsedData(null);
     setUploadCompleted(false);
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target.result;
-        const normalized = parseAndNormalizeCSV(text);
-        setParsedData(normalized);
-      } catch (err) {
-        console.error('CSV Parsing Error:', err);
-        setParseError(err.message || 'Erreur lors du traitement du fichier CSV.');
-        setFile(null);
-      }
-    };
-    reader.readAsText(selectedFile, 'UTF-8');
+    try {
+      const parsed = await parseAndNormalizeExcel(selectedFile);
+      setParsedData(parsed);
+    } catch (err) {
+      console.error('Excel Parsing Error:', err);
+      setParseError(err.message || 'Erreur lors du traitement du fichier Excel.');
+      setFile(null);
+    }
   };
 
   const handleUploadSubmit = async () => {
@@ -146,7 +142,7 @@ export default function Import() {
         {/* Header Controls (Restricted Gating Switcher) */}
         <div className="flex-between" style={{ flexWrap: 'wrap', gap: 'var(--space-4)' }}>
           <div>
-            <h2 className="section-title">Importation en Masse (CSV)</h2>
+            <h2 className="section-title">Importation en Masse (Excel)</h2>
             <p className="section-subtitle">
               Intégrer vos listes existantes directement dans la base de données
             </p>
@@ -226,13 +222,13 @@ export default function Import() {
                   </div>
                   <div style={{ flex: 1 }}>
                     <h4 className="font-semibold text-base" style={{ marginBottom: 'var(--space-1)' }}>
-                      Instructions de formatage CSV
+                      Instructions d'importation Excel
                     </h4>
                     <p className="text-sm text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-                      Le fichier importé doit utiliser le point-virgule (<strong>;</strong>) comme délimiteur. 
-                      Les en-têtes de colonnes seront automatiquement mappés vers notre schéma (ex: <i>nCommande</i>, <i>emailAcheteur</i>, <i>prixPublic</i>). 
-                      Les décimales au format européen (ex: <strong>45,50 €</strong>) seront converties en floats standards (<strong>45.50</strong>). 
-                      Toutes les colonnes intégralement vides dans le fichier seront automatiquement identifiées et exclues lors du téléversement.
+                      Le fichier importé doit être au format Excel moderne (<strong>.xlsx</strong>) ou Excel 97-2003 (<strong>.xls</strong>). 
+                      Les en-têtes de la première ligne seront mappés vers notre schéma (ex: <i>nCommande</i>, <i>emailAcheteur</i>, <i>prixPublic</i>). 
+                      Les prix et montants seront automatiquement décodés en nombres réels, et les dates seront normalisées. 
+                      Toutes les colonnes intégralement vides dans le fichier seront automatiquement identifiées et exclues lors de l'importation.
                     </p>
                   </div>
                 </div>
@@ -288,12 +284,12 @@ export default function Import() {
                       type="file"
                       id="import-file-input"
                       className="hidden-file-input"
-                      accept=".csv"
+                      accept=".xlsx, .xls"
                       onChange={handleFileChange}
                     />
                     <UploadCloud size={48} className="dropzone-icon" />
-                    <p className="font-semibold text-base">Glissez-déposez votre fichier CSV ici</p>
-                    <p className="text-xs text-secondary">Ou cliquez pour parcourir vos fichiers (.csv délimité par des points-virgules)</p>
+                    <p className="font-semibold text-base">Glissez-déposez votre fichier Excel ici</p>
+                    <p className="text-xs text-secondary">Ou cliquez pour parcourir vos fichiers (.xlsx ou .xls)</p>
                   </div>
                 )}
 
@@ -409,22 +405,25 @@ export default function Import() {
                             </tr>
                           </thead>
                           <tbody>
-                            {parsedData.tickets.slice(0, 5).map((t, index) => (
-                              <tr key={t.id || index}>
-                                <td>{t.nCommande || '—'}</td>
-                                <td>
-                                  <div className="flex-col">
-                                    <span>{t.typologie || '—'}</span>
-                                    <span className="text-tertiary text-xxs">{t.tarif || '—'}</span>
-                                  </div>
-                                </td>
-                                <td>{t.prenomAcheteur} {t.nomAcheteur}</td>
-                                <td>{t.prenomParticipant} {t.nomParticipant}</td>
-                                <td>{t.prixPublic ? `${t.prixPublic.toFixed(2)} €` : '—'}</td>
-                                <td>{t.totalFrais ? `${t.totalFrais.toFixed(2)} €` : '—'}</td>
-                                <td className="font-semibold">{t.ttcPrixPaye ? `${t.ttcPrixPaye.toFixed(2)} €` : '0.00 €'}</td>
-                              </tr>
-                            ))}
+                            {parsedData.tickets.slice(0, 5).map((t, index) => {
+                              const norm = normalizeTicketForUI(t);
+                              return (
+                                <tr key={norm.id || index}>
+                                  <td>{norm.nCommande || '—'}</td>
+                                  <td>
+                                    <div className="flex-col">
+                                      <span>{norm.typologie || '—'}</span>
+                                      <span className="text-tertiary text-xxs">{norm.tarif || '—'}</span>
+                                    </div>
+                                  </td>
+                                  <td>{norm.prenomAcheteur} {norm.nomAcheteur}</td>
+                                  <td>{norm.prenomParticipant} {norm.nomParticipant}</td>
+                                  <td>{norm.prixPublic ? `${norm.prixPublic.toFixed(2)} €` : '—'}</td>
+                                  <td>{norm.totalFrais ? `${norm.totalFrais.toFixed(2)} €` : '—'}</td>
+                                  <td className="font-semibold">{norm.ttcPrixPaye ? `${norm.ttcPrixPaye.toFixed(2)} €` : '0.00 €'}</td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

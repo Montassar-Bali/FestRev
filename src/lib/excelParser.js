@@ -1,4 +1,4 @@
-// CSV Parsing and Normalization Utility for FestRev
+import ExcelJS from 'exceljs';
 
 // Schema keys list
 export const SCHEMA_KEYS = [
@@ -26,8 +26,8 @@ export const PRICING_KEYS = [
   'ttcPrixSansCommission', 'htPrixPaye', 'taxe'
 ];
 
-// Mapping of potential CSV headers (case-insensitive, trimmed) to our schema fields
-export const CSV_MAPPING = {
+// Mapping of potential Excel headers (case-insensitive, trimmed) to our schema fields
+export const EXCEL_MAPPING = {
   // Section 1: Order & Ticket Details
   "id": "id",
   "ticket id": "id",
@@ -201,28 +201,13 @@ export const CSV_MAPPING = {
   "date naissance": "dateNaissanceParticipant"
 };
 
+export const CSV_MAPPING = EXCEL_MAPPING; // Backward compatibility
+
 // Sanitizes Firebase Realtime Database keys to remove illegal characters (., $, #, [, ], /)
 export function sanitizeFirebaseKey(key) {
   return String(key)
     .replace(/[\.\$\[\]\#\/]/g, '_')
     .trim();
-}
-
-// Auto-detect CSV delimiter (;, ,, or \t)
-export function detectDelimiter(headerLine) {
-  const delimiters = [';', ',', '\t'];
-  let bestDelimiter = ';';
-  let maxCount = -1;
-  
-  delimiters.forEach(d => {
-    const count = (headerLine.split(d).length - 1);
-    if (count > maxCount) {
-      maxCount = count;
-      bestDelimiter = d;
-    }
-  });
-  
-  return bestDelimiter;
 }
 
 // Generates UUID
@@ -285,52 +270,117 @@ export function normalizeDate(str) {
   return trimmed;
 }
 
-// Parse a single CSV line with semicolon delimiter, respecting quote escapes
-export function parseCSVLine(line, delimiter = ';') {
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-  
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === delimiter && !inQuotes) {
-      result.push(current.trim());
-      current = '';
-    } else {
-      current += char;
-    }
+// Main parsing and normalization function for Excel
+export async function parseAndNormalizeExcel(file) {
+  if (!file) {
+    throw new Error("Aucun fichier fourni.");
   }
-  result.push(current.trim());
-  return result;
-}
+  
+  let arrayBuffer;
+  try {
+    arrayBuffer = await file.arrayBuffer();
+  } catch (err) {
+    throw new Error("Impossible de lire le fichier sous forme de mémoire tampon.");
+  }
 
-// Main parsing and normalization function
-export function parseAndNormalizeCSV(csvText) {
-  // Split lines, filtering out totally empty lines
-  const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
-  if (lines.length < 2) {
-    throw new Error("Le fichier CSV doit contenir une ligne d'en-tête et au moins une ligne de données.");
-  }
-  
-  // Auto-detect delimiter
-  const delimiter = detectDelimiter(lines[0]);
-  
-  // Read and clean raw headers (remove quote marks)
-  const rawHeaders = parseCSVLine(lines[0], delimiter).map(h => h.replace(/^"|"$/g, '').trim());
-  
-  // Parse rows
-  const parsedRows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const rowValues = parseCSVLine(lines[i], delimiter).map(v => v.replace(/^"|"$/g, '').trim());
-    // Pad values to match header length if needed
-    while (rowValues.length < rawHeaders.length) {
-      rowValues.push('');
+  const workbook = new ExcelJS.Workbook();
+  try {
+    await workbook.xlsx.load(arrayBuffer);
+  } catch (err) {
+    console.error("ExcelJS read error:", err);
+    if (file.name.endsWith('.xls')) {
+      throw new Error("Les fichiers au format Excel 97-2003 (.xls) ne sont pas pris en charge directement. Veuillez réenregistrer le fichier au format Excel moderne (.xlsx) avant de l'importer.");
     }
-    parsedRows.push(rowValues);
+    throw new Error("Impossible de charger le fichier Excel. Assurez-vous qu'il s'agit d'un fichier .xlsx valide.");
   }
-  
+
+  // Get first worksheet
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) {
+    throw new Error("Le fichier Excel ne contient aucune feuille de calcul.");
+  }
+
+  const rowCount = worksheet.rowCount;
+  if (rowCount < 1) {
+    throw new Error("La feuille de calcul est vide.");
+  }
+
+  // Extract raw headers
+  const headerRow = worksheet.getRow(1);
+  const columnCount = worksheet.columnCount;
+  const rawHeaders = [];
+
+  for (let c = 1; c <= columnCount; c++) {
+    const cell = headerRow.getCell(c);
+    let cellText = '';
+    if (cell.value !== null && cell.value !== undefined) {
+      if (typeof cell.value === 'object') {
+        if (cell.value.richText) {
+          cellText = cell.value.richText.map(t => t.text).join('');
+        } else if (cell.value.result !== undefined) {
+          cellText = String(cell.value.result);
+        } else if (cell.value.text !== undefined) {
+          cellText = String(cell.value.text);
+        } else {
+          cellText = String(cell.value);
+        }
+      } else {
+        cellText = String(cell.value);
+      }
+    }
+    rawHeaders.push(cellText.trim());
+  }
+
+  // Parse row values
+  const parsedRows = [];
+  for (let r = 2; r <= rowCount; r++) {
+    const row = worksheet.getRow(r);
+    const rowValues = [];
+    let isRowTotallyEmpty = true;
+
+    for (let c = 1; c <= columnCount; c++) {
+      const cell = row.getCell(c);
+      let cellVal = '';
+
+      if (cell.value !== null && cell.value !== undefined) {
+        if (cell.value instanceof Date) {
+          // Format Date to YYYY-MM-DD
+          const d = cell.value;
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          cellVal = `${year}-${month}-${day}`;
+        } else if (typeof cell.value === 'object') {
+          if (cell.value.richText) {
+            cellVal = cell.value.richText.map(t => t.text).join('');
+          } else if (cell.value.result !== undefined) {
+            cellVal = String(cell.value.result);
+          } else if (cell.value.text !== undefined) {
+            cellVal = String(cell.value.text);
+          } else {
+            cellVal = String(cell.value);
+          }
+        } else {
+          cellVal = String(cell.value);
+        }
+      }
+
+      const trimmedVal = cellVal.trim();
+      if (trimmedVal !== '') {
+        isRowTotallyEmpty = false;
+      }
+      rowValues.push(trimmedVal);
+    }
+
+    if (!isRowTotallyEmpty) {
+      parsedRows.push(rowValues);
+    }
+  }
+
+  if (parsedRows.length === 0) {
+    throw new Error("Le fichier Excel ne contient aucune ligne de données sous l'en-tête.");
+  }
+
   // Identify columns that are completely empty in ALL rows
   const emptyColumnIndices = new Set();
   for (let colIndex = 0; colIndex < rawHeaders.length; colIndex++) {
@@ -346,37 +396,35 @@ export function parseAndNormalizeCSV(csvText) {
       emptyColumnIndices.add(colIndex);
     }
   }
-  
+
   // Filter out empty columns from headers and row data
   const headers = rawHeaders.filter((_, idx) => !emptyColumnIndices.has(idx));
   const rows = parsedRows.map(row => row.filter((_, idx) => !emptyColumnIndices.has(idx)));
-  
-  // Map row arrays to raw ticket objects matching the CSV exactly
+
+  // Map row arrays to raw ticket objects matching the Excel exactly
   const tickets = rows.map((row) => {
     const ticket = {};
     let foundId = '';
     
     headers.forEach((header, colIdx) => {
+      if (!header) return;
+
       const rawVal = row[colIdx] !== undefined && row[colIdx] !== null ? String(row[colIdx]) : '';
       
-      // Store the exact raw header key and value (sanitized only for Firebase key characters)
       const safeRawKey = sanitizeFirebaseKey(header);
       if (safeRawKey) {
         ticket[safeRawKey] = rawVal;
       }
       
-      // Look if this header maps to "id" schema key to preserve it
       const normalizedHeader = String(header).toLowerCase();
-      const schemaKey = CSV_MAPPING[normalizedHeader];
+      const schemaKey = EXCEL_MAPPING[normalizedHeader];
       if (schemaKey === 'id' && rawVal) {
         foundId = rawVal;
       }
     });
     
-    // Ensure we have a unique ID for Firebase RTDB key
     ticket.id = foundId || generateUUID();
     
-    // Add createdAt metadata if not present in the CSV
     const hasCreatedAt = Object.keys(ticket).some(k => k.toLowerCase() === 'createdat');
     if (!hasCreatedAt) {
       ticket.createdAt = new Date().toISOString();
@@ -384,7 +432,7 @@ export function parseAndNormalizeCSV(csvText) {
     
     return ticket;
   });
-  
+
   return {
     originalCount: parsedRows.length,
     filteredEmptyColumnsCount: emptyColumnIndices.size,
@@ -399,16 +447,14 @@ export function normalizeTicketForUI(ticket) {
   
   const normalized = { ...ticket };
   
-  // 1. Map raw/custom CSV keys to schema keys using CSV_MAPPING (case-insensitive)
   Object.keys(ticket).forEach(key => {
     const normalizedKey = key.toLowerCase().trim();
-    const schemaKey = CSV_MAPPING[normalizedKey];
+    const schemaKey = EXCEL_MAPPING[normalizedKey];
     if (schemaKey && normalized[schemaKey] === undefined) {
       normalized[schemaKey] = ticket[key];
     }
   });
   
-  // 2. Ensure pricing fields are normalized to floats
   PRICING_KEYS.forEach(key => {
     if (normalized[key] !== undefined && normalized[key] !== null) {
       normalized[key] = parseEuroFloat(normalized[key]);
@@ -417,7 +463,6 @@ export function normalizeTicketForUI(ticket) {
     }
   });
   
-  // 3. Ensure booleans/numbers are correct
   const rawComposte = normalized.composte;
   if (rawComposte !== undefined && rawComposte !== null) {
     const valStr = String(rawComposte).toLowerCase().trim();
@@ -442,11 +487,9 @@ export function normalizeTicketForUI(ticket) {
     normalized.codeBarres = 0;
   }
   
-  // 4. Normalize dates
   if (normalized.dateCommande) normalized.dateCommande = normalizeDate(normalized.dateCommande);
   if (normalized.datePaiement) normalized.datePaiement = normalizeDate(normalized.datePaiement);
   
-  // 5. Fallbacks between buyer and participant if one is missing
   if (!normalized.nomAcheteur && normalized.nomParticipant) normalized.nomAcheteur = normalized.nomParticipant;
   if (!normalized.prenomAcheteur && normalized.prenomParticipant) normalized.prenomAcheteur = normalized.prenomParticipant;
   if (!normalized.emailAcheteur && normalized.emailParticipant) normalized.emailAcheteur = normalized.emailParticipant;
@@ -457,7 +500,6 @@ export function normalizeTicketForUI(ticket) {
   if (!normalized.emailParticipant && normalized.emailAcheteur) normalized.emailParticipant = normalized.emailAcheteur;
   if (!normalized.telephoneParticipant && normalized.mobileAcheteur) normalized.telephoneParticipant = normalized.mobileAcheteur;
   
-  // 6. Default values if missing
   if (!normalized.devise) normalized.devise = 'EUR';
   if (!normalized.id) normalized.id = ticket.id || generateUUID();
   
