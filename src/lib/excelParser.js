@@ -62,11 +62,19 @@ export const EXCEL_MAPPING = {
   "numcommande": "nCommande",
   "numero de commande": "nCommande",
   "numéro de commande": "nCommande",
+  "n. de commande": "nCommande",
+  "n_ de commande": "nCommande",
+  "ndecommande": "nCommande",
   "ncommandeavance": "nCommandeAvance",
+  "n. de commande avancé": "nCommandeAvance",
+  "n_ de commande avancé": "nCommandeAvance",
+  "ndecommandeavance": "nCommandeAvance",
   "nbillet": "nBillet",
   "num billet": "nBillet",
   "numéro billet": "nBillet",
   "n° billet": "nBillet",
+  "n. billet": "nBillet",
+  "n_ billet": "nBillet",
   "devise": "devise",
   "supprime": "supprime",
   "supprimé": "supprime",
@@ -198,10 +206,42 @@ export const EXCEL_MAPPING = {
   "ville": "villeParticipant",
   "pays": "paysParticipant",
   "date de naissance": "dateNaissanceParticipant",
-  "date naissance": "dateNaissanceParticipant"
+  "date naissance": "dateNaissanceParticipant",
+  
+  // Explicit mappings for standard French headers matching the Excel file
+  "taxe (pour vos déclarations fiscales)": "taxe",
+  "consentement (opt-in rgpd)": "consentement",
+  "date de la nuitée supplementaire": "dateNuiteeSupplementaire",
+  "référence du full pass": "referenceFullPass",
+  "date de naissance participant": "dateNaissanceParticipant",
+  "facture - société": "factureSociete",
+  "facture - n° tva intracomm": "factureTva",
+  "facture - adresse": "factureAdresse",
+  "facture - code postal": "factureCodePostal",
+  "facture - ville": "factureVille",
+  "facture - pays": "facturePays",
+  "informations complémentaires": "informationsComplementaires",
+  "origine (marketing)": "origineMarketing"
 };
 
 export const CSV_MAPPING = EXCEL_MAPPING; // Backward compatibility
+
+// Helper function to standardize keys by converting to lowercase, removing accents and non-alphanumeric chars
+export function standardizeKey(key) {
+  if (!key) return '';
+  return String(key)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
+// Build standard mapping lookup at runtime
+export const STANDARDIZED_MAPPING = {};
+Object.keys(EXCEL_MAPPING).forEach(key => {
+  STANDARDIZED_MAPPING[standardizeKey(key)] = EXCEL_MAPPING[key];
+});
 
 // Sanitizes Firebase Realtime Database keys to remove illegal characters (., $, #, [, ], /)
 export function sanitizeFirebaseKey(key) {
@@ -305,75 +345,80 @@ export async function parseAndNormalizeExcel(file) {
     throw new Error("La feuille de calcul est vide.");
   }
 
-  // Extract raw headers
-  const headerRow = worksheet.getRow(1);
   const columnCount = worksheet.columnCount;
-  const rawHeaders = [];
 
-  for (let c = 1; c <= columnCount; c++) {
-    const cell = headerRow.getCell(c);
-    let cellText = '';
-    if (cell.value !== null && cell.value !== undefined) {
-      if (typeof cell.value === 'object') {
-        if (cell.value.richText) {
-          cellText = cell.value.richText.map(t => t.text).join('');
-        } else if (cell.value.result !== undefined) {
-          cellText = String(cell.value.result);
-        } else if (cell.value.text !== undefined) {
-          cellText = String(cell.value.text);
-        } else {
-          cellText = String(cell.value);
-        }
-      } else {
-        cellText = String(cell.value);
-      }
-    }
-    rawHeaders.push(cellText.trim());
-  }
-
-  // Parse row values
-  const parsedRows = [];
-  for (let r = 2; r <= rowCount; r++) {
-    const row = worksheet.getRow(r);
-    const rowValues = [];
-    let isRowTotallyEmpty = true;
-
-    for (let c = 1; c <= columnCount; c++) {
+  // Helper to extract values from a row
+  function extractRowValues(row, colCount) {
+    const vals = [];
+    let isRowEmpty = true;
+    for (let c = 1; c <= colCount; c++) {
       const cell = row.getCell(c);
-      let cellVal = '';
-
+      let cellText = '';
       if (cell.value !== null && cell.value !== undefined) {
         if (cell.value instanceof Date) {
-          // Format Date to YYYY-MM-DD
           const d = cell.value;
           const year = d.getFullYear();
           const month = String(d.getMonth() + 1).padStart(2, '0');
           const day = String(d.getDate()).padStart(2, '0');
-          cellVal = `${year}-${month}-${day}`;
+          cellText = `${year}-${month}-${day}`;
         } else if (typeof cell.value === 'object') {
           if (cell.value.richText) {
-            cellVal = cell.value.richText.map(t => t.text).join('');
+            cellText = cell.value.richText.map(t => t.text).join('');
           } else if (cell.value.result !== undefined) {
-            cellVal = String(cell.value.result);
+            cellText = String(cell.value.result);
           } else if (cell.value.text !== undefined) {
-            cellVal = String(cell.value.text);
+            cellText = String(cell.value.text);
           } else {
-            cellVal = String(cell.value);
+            cellText = String(cell.value);
           }
         } else {
-          cellVal = String(cell.value);
+          cellText = String(cell.value);
         }
       }
-
-      const trimmedVal = cellVal.trim();
-      if (trimmedVal !== '') {
-        isRowTotallyEmpty = false;
+      const trimmed = cellText.trim();
+      if (trimmed !== '') {
+        isRowEmpty = false;
       }
-      rowValues.push(trimmedVal);
+      vals.push(trimmed);
     }
+    return { vals, isRowEmpty };
+  }
 
-    if (!isRowTotallyEmpty) {
-      parsedRows.push(rowValues);
+  // Extract values for Row 1 and Row 2 to determine headers
+  const row1Data = extractRowValues(worksheet.getRow(1), columnCount);
+  const row2Data = rowCount >= 2 ? extractRowValues(worksheet.getRow(2), columnCount) : { vals: [], isRowEmpty: true };
+
+  // Helper to check if a row looks like a header row
+  function looksLikeHeaderRow(rowValues) {
+    const keywords = ['typologie', 'commande', 'acheteur', 'participant', 'billet', 'tarif', 'prix', 'code', 'date', 'heure'];
+    let score = 0;
+    rowValues.forEach(val => {
+      if (!val) return;
+      const valLower = String(val).toLowerCase();
+      if (keywords.some(kw => valLower.includes(kw))) {
+        score++;
+      }
+    });
+    return score >= 3;
+  }
+
+  let rawHeaders = row1Data.vals;
+  let startDataRowIndex = 2;
+
+  if (rowCount >= 2 && !looksLikeHeaderRow(row1Data.vals) && looksLikeHeaderRow(row2Data.vals)) {
+    rawHeaders = row2Data.vals;
+    startDataRowIndex = 3;
+    console.log("Dynamic Header Detection: Row 2 identified as header row.");
+  } else {
+    console.log("Dynamic Header Detection: Row 1 identified as header row.");
+  }
+
+  // Parse row values
+  const parsedRows = [];
+  for (let r = startDataRowIndex; r <= rowCount; r++) {
+    const { vals, isRowEmpty } = extractRowValues(worksheet.getRow(r), columnCount);
+    if (!isRowEmpty) {
+      parsedRows.push(vals);
     }
   }
 
@@ -448,8 +493,8 @@ export function normalizeTicketForUI(ticket) {
   const normalized = { ...ticket };
   
   Object.keys(ticket).forEach(key => {
-    const normalizedKey = key.toLowerCase().trim();
-    const schemaKey = EXCEL_MAPPING[normalizedKey];
+    const stdKey = standardizeKey(key);
+    const schemaKey = STANDARDIZED_MAPPING[stdKey];
     if (schemaKey && normalized[schemaKey] === undefined) {
       normalized[schemaKey] = ticket[key];
     }
