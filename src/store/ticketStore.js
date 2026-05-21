@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { ref, onValue, set, update, remove } from 'firebase/database';
 import { db } from '../lib/firebase';
+import { normalizeTicketForUI } from '../lib/csvParser';
 
 // Helper function to generate UUID
 function generateUUID() {
@@ -372,8 +373,8 @@ onValue(ticketsRef, (snapshot) => {
   if (!data) {
     useTicketStore.setState({ tickets: [], loading: false });
   } else {
-    // Map objects back to arrays
-    const tickets = Object.values(data);
+    // Map objects back to arrays and normalize for UI
+    const tickets = Object.values(data).map(normalizeTicketForUI);
     useTicketStore.setState({ tickets, loading: false });
   }
 }, (error) => {

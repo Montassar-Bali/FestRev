@@ -183,8 +183,47 @@ export const CSV_MAPPING = {
   "informationscomplementaires": "informationsComplementaires",
   "informations complémentaires": "informationsComplementaires",
   "notes": "informationsComplementaires",
-  "commentaire": "informationsComplementaires"
+  "commentaire": "informationsComplementaires",
+  
+  // Singular direct fields (fallback/single ticket holder info)
+  "nom": "nomParticipant",
+  "prénom": "prenomParticipant",
+  "prenom": "prenomParticipant",
+  "email": "emailParticipant",
+  "e-mail": "emailParticipant",
+  "téléphone": "telephoneParticipant",
+  "telephone": "telephoneParticipant",
+  "tél": "telephoneParticipant",
+  "tel": "telephoneParticipant",
+  "ville": "villeParticipant",
+  "pays": "paysParticipant",
+  "date de naissance": "dateNaissanceParticipant",
+  "date naissance": "dateNaissanceParticipant"
 };
+
+// Sanitizes Firebase Realtime Database keys to remove illegal characters (., $, #, [, ], /)
+export function sanitizeFirebaseKey(key) {
+  return String(key)
+    .replace(/[\.\$\[\]\#\/]/g, '_')
+    .trim();
+}
+
+// Auto-detect CSV delimiter (;, ,, or \t)
+export function detectDelimiter(headerLine) {
+  const delimiters = [';', ',', '\t'];
+  let bestDelimiter = ';';
+  let maxCount = -1;
+  
+  delimiters.forEach(d => {
+    const count = (headerLine.split(d).length - 1);
+    if (count > maxCount) {
+      maxCount = count;
+      bestDelimiter = d;
+    }
+  });
+  
+  return bestDelimiter;
+}
 
 // Generates UUID
 function generateUUID() {
@@ -275,13 +314,16 @@ export function parseAndNormalizeCSV(csvText) {
     throw new Error("Le fichier CSV doit contenir une ligne d'en-tête et au moins une ligne de données.");
   }
   
+  // Auto-detect delimiter
+  const delimiter = detectDelimiter(lines[0]);
+  
   // Read and clean raw headers (remove quote marks)
-  const rawHeaders = parseCSVLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim());
+  const rawHeaders = parseCSVLine(lines[0], delimiter).map(h => h.replace(/^"|"$/g, '').trim());
   
   // Parse rows
   const parsedRows = [];
   for (let i = 1; i < lines.length; i++) {
-    const rowValues = parseCSVLine(lines[i]).map(v => v.replace(/^"|"$/g, '').trim());
+    const rowValues = parseCSVLine(lines[i], delimiter).map(v => v.replace(/^"|"$/g, '').trim());
     // Pad values to match header length if needed
     while (rowValues.length < rawHeaders.length) {
       rowValues.push('');
@@ -309,46 +351,34 @@ export function parseAndNormalizeCSV(csvText) {
   const headers = rawHeaders.filter((_, idx) => !emptyColumnIndices.has(idx));
   const rows = parsedRows.map(row => row.filter((_, idx) => !emptyColumnIndices.has(idx)));
   
-  // Map row arrays to ticket schema objects
+  // Map row arrays to raw ticket objects matching the CSV exactly
   const tickets = rows.map((row) => {
     const ticket = {};
-    
-    // Set default schema settings
-    ticket.devise = 'EUR';
-    ticket.composte = 0;
-    ticket.supprime = 0;
+    let foundId = '';
     
     headers.forEach((header, colIdx) => {
-      const rawVal = row[colIdx];
+      const rawVal = row[colIdx] !== undefined && row[colIdx] !== null ? String(row[colIdx]) : '';
+      
+      // Store the exact raw header key and value (sanitized only for Firebase key characters)
+      const safeRawKey = sanitizeFirebaseKey(header);
+      if (safeRawKey) {
+        ticket[safeRawKey] = rawVal;
+      }
+      
+      // Look if this header maps to "id" schema key to preserve it
       const normalizedHeader = String(header).toLowerCase();
-      
-      // Find corresponding database field
       const schemaKey = CSV_MAPPING[normalizedHeader];
-      
-      if (schemaKey) {
-        if (PRICING_KEYS.includes(schemaKey)) {
-          ticket[schemaKey] = parseEuroFloat(rawVal);
-        } else if (schemaKey === 'codeBarres') {
-          // Clean out spacing for integers like barcodes
-          const valClean = String(rawVal).replace(/\s/g, '');
-          const intVal = parseInt(valClean, 10);
-          ticket[schemaKey] = isNaN(intVal) ? 0 : intVal;
-        } else if (schemaKey === 'composte' || schemaKey === 'supprime') {
-          const valStr = String(rawVal).toLowerCase();
-          ticket[schemaKey] = (valStr === '1' || valStr === 'oui' || valStr === 'yes' || valStr === 'true') ? 1 : 0;
-        } else if (['dateCommande', 'datePaiement'].includes(schemaKey)) {
-          ticket[schemaKey] = normalizeDate(rawVal);
-        } else {
-          ticket[schemaKey] = rawVal !== undefined && rawVal !== null ? String(rawVal) : '';
-        }
+      if (schemaKey === 'id' && rawVal) {
+        foundId = rawVal;
       }
     });
     
-    // Ensure vital columns are generated if missing
-    if (!ticket.id) {
-      ticket.id = generateUUID();
-    }
-    if (!ticket.createdAt) {
+    // Ensure we have a unique ID for Firebase RTDB key
+    ticket.id = foundId || generateUUID();
+    
+    // Add createdAt metadata if not present in the CSV
+    const hasCreatedAt = Object.keys(ticket).some(k => k.toLowerCase() === 'createdat');
+    if (!hasCreatedAt) {
       ticket.createdAt = new Date().toISOString();
     }
     
@@ -361,4 +391,75 @@ export function parseAndNormalizeCSV(csvText) {
     removedColumns: rawHeaders.filter((_, idx) => emptyColumnIndices.has(idx)),
     tickets
   };
+}
+
+// Normalize a raw database ticket object into a clean, fully populated schema-compliant object for UI usage
+export function normalizeTicketForUI(ticket) {
+  if (!ticket) return null;
+  
+  const normalized = { ...ticket };
+  
+  // 1. Map raw/custom CSV keys to schema keys using CSV_MAPPING (case-insensitive)
+  Object.keys(ticket).forEach(key => {
+    const normalizedKey = key.toLowerCase().trim();
+    const schemaKey = CSV_MAPPING[normalizedKey];
+    if (schemaKey && normalized[schemaKey] === undefined) {
+      normalized[schemaKey] = ticket[key];
+    }
+  });
+  
+  // 2. Ensure pricing fields are normalized to floats
+  PRICING_KEYS.forEach(key => {
+    if (normalized[key] !== undefined && normalized[key] !== null) {
+      normalized[key] = parseEuroFloat(normalized[key]);
+    } else {
+      normalized[key] = 0;
+    }
+  });
+  
+  // 3. Ensure booleans/numbers are correct
+  const rawComposte = normalized.composte;
+  if (rawComposte !== undefined && rawComposte !== null) {
+    const valStr = String(rawComposte).toLowerCase().trim();
+    normalized.composte = (valStr === '1' || valStr === 'oui' || valStr === 'yes' || valStr === 'true') ? 1 : 0;
+  } else {
+    normalized.composte = 0;
+  }
+  
+  const rawSupprime = normalized.supprime;
+  if (rawSupprime !== undefined && rawSupprime !== null) {
+    const valStr = String(rawSupprime).toLowerCase().trim();
+    normalized.supprime = (valStr === '1' || valStr === 'oui' || valStr === 'yes' || valStr === 'true') ? 1 : 0;
+  } else {
+    normalized.supprime = 0;
+  }
+  
+  if (normalized.codeBarres !== undefined && normalized.codeBarres !== null && normalized.codeBarres !== '') {
+    const valClean = String(normalized.codeBarres).replace(/\s/g, '');
+    const intVal = parseInt(valClean, 10);
+    normalized.codeBarres = isNaN(intVal) ? 0 : intVal;
+  } else {
+    normalized.codeBarres = 0;
+  }
+  
+  // 4. Normalize dates
+  if (normalized.dateCommande) normalized.dateCommande = normalizeDate(normalized.dateCommande);
+  if (normalized.datePaiement) normalized.datePaiement = normalizeDate(normalized.datePaiement);
+  
+  // 5. Fallbacks between buyer and participant if one is missing
+  if (!normalized.nomAcheteur && normalized.nomParticipant) normalized.nomAcheteur = normalized.nomParticipant;
+  if (!normalized.prenomAcheteur && normalized.prenomParticipant) normalized.prenomAcheteur = normalized.prenomParticipant;
+  if (!normalized.emailAcheteur && normalized.emailParticipant) normalized.emailAcheteur = normalized.emailParticipant;
+  if (!normalized.mobileAcheteur && normalized.telephoneParticipant) normalized.mobileAcheteur = normalized.telephoneParticipant;
+  
+  if (!normalized.nomParticipant && normalized.nomAcheteur) normalized.nomParticipant = normalized.nomAcheteur;
+  if (!normalized.prenomParticipant && normalized.prenomAcheteur) normalized.prenomParticipant = normalized.prenomAcheteur;
+  if (!normalized.emailParticipant && normalized.emailAcheteur) normalized.emailParticipant = normalized.emailAcheteur;
+  if (!normalized.telephoneParticipant && normalized.mobileAcheteur) normalized.telephoneParticipant = normalized.mobileAcheteur;
+  
+  // 6. Default values if missing
+  if (!normalized.devise) normalized.devise = 'EUR';
+  if (!normalized.id) normalized.id = ticket.id || generateUUID();
+  
+  return normalized;
 }
