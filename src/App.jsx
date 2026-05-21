@@ -1,3 +1,4 @@
+import { useState, useCallback, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import Sidebar from './components/layout/Sidebar';
@@ -23,12 +24,41 @@ function AnimatedRoutes() {
 }
 
 export default function App() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((prev) => !prev);
+  }, []);
+
+  const closeSidebar = useCallback(() => {
+    setSidebarOpen(false);
+  }, []);
+
+  // Close sidebar on window resize to desktop
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth > 1024) {
+        setSidebarOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   return (
     <BrowserRouter>
-      <div className="app-layout">
-        <Sidebar />
+      <div className={`app-layout ${sidebarOpen ? 'sidebar-open' : ''}`}>
+        {/* Overlay for mobile/tablet sidebar */}
+        {sidebarOpen && (
+          <div
+            className="sidebar-overlay"
+            onClick={closeSidebar}
+            aria-hidden="true"
+          />
+        )}
+        <Sidebar isOpen={sidebarOpen} onClose={closeSidebar} />
         <div className="app-main">
-          <Header />
+          <Header onToggleSidebar={toggleSidebar} />
           <main className="app-content">
             <AnimatedRoutes />
           </main>

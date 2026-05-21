@@ -28,20 +28,20 @@ const linkVariants = {
   hover: { x: 4 },
 };
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, onClose }) {
   const location = useLocation();
 
   return (
     <motion.aside
       id="sidebar"
-      className="sidebar"
+      className={`sidebar ${isOpen ? 'open' : ''}`}
       variants={sidebarVariants}
       initial="hidden"
       animate="visible"
     >
       {/* Logo */}
       <div className="sidebar-logo">
-        <NavLink to="/" className="sidebar-logo-link">
+        <NavLink to="/" className="sidebar-logo-link" onClick={onClose}>
           <motion.img
             src="/logo.png"
             alt="FestRev Logo"
@@ -66,6 +66,7 @@ export default function Sidebar() {
               to={item.to}
               id={`nav-${item.to.replace('/', '') || 'dashboard'}`}
               className={`sidebar-link ${isActive ? 'active' : ''}`}
+              onClick={onClose}
             >
               <motion.div
                 className="flex-row gap-3"
