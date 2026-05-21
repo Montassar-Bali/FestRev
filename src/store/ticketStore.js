@@ -370,14 +370,7 @@ const ticketsRef = ref(db, 'tickets');
 onValue(ticketsRef, (snapshot) => {
   const data = snapshot.val();
   if (!data) {
-    // Database is empty under '/tickets', seed it!
-    const seedTickets = buildSeedTickets();
-    const ticketsObj = {};
-    seedTickets.forEach((t) => {
-      ticketsObj[t.id] = t;
-    });
-    set(ref(db, 'tickets'), ticketsObj);
-    useTicketStore.setState({ tickets: seedTickets, loading: false });
+    useTicketStore.setState({ tickets: [], loading: false });
   } else {
     // Map objects back to arrays
     const tickets = Object.values(data);
