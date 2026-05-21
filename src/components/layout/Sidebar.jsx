@@ -14,15 +14,6 @@ const navItems = [
   { to: '/export', label: 'Exporter', icon: FileSpreadsheet },
 ];
 
-const sidebarVariants = {
-  hidden: { x: -260, opacity: 0 },
-  visible: {
-    x: 0,
-    opacity: 1,
-    transition: { duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] },
-  },
-};
-
 const linkVariants = {
   rest: { x: 0 },
   hover: { x: 4 },
@@ -32,12 +23,9 @@ export default function Sidebar({ isOpen, onClose }) {
   const location = useLocation();
 
   return (
-    <motion.aside
+    <aside
       id="sidebar"
       className={`sidebar ${isOpen ? 'open' : ''}`}
-      variants={sidebarVariants}
-      initial="hidden"
-      animate="visible"
     >
       {/* Logo */}
       <div className="sidebar-logo">
@@ -89,6 +77,6 @@ export default function Sidebar({ isOpen, onClose }) {
         <p className="sidebar-footer-text">FestRev v1.0</p>
         <p className="sidebar-footer-text">Gestion Hôtelière</p>
       </div>
-    </motion.aside>
+    </aside>
   );
 }
