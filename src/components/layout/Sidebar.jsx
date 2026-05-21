@@ -2,15 +2,13 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard,
-  CalendarDays,
-  Building2,
+  Ticket,
   FileSpreadsheet,
 } from 'lucide-react';
 
 const navItems = [
   { to: '/', label: 'Tableau de Bord', icon: LayoutDashboard },
-  { to: '/reservations', label: 'Réservations', icon: CalendarDays },
-  { to: '/hotels', label: 'Hôtels', icon: Building2 },
+  { to: '/tickets', label: 'Billets', icon: Ticket },
   { to: '/export', label: 'Exporter', icon: FileSpreadsheet },
 ];
 
@@ -75,7 +73,7 @@ export default function Sidebar({ isOpen, onClose }) {
       {/* Footer */}
       <div className="sidebar-footer">
         <p className="sidebar-footer-text">FestRev v1.0</p>
-        <p className="sidebar-footer-text">Gestion Hôtelière</p>
+        <p className="sidebar-footer-text">Gestion Billetterie</p>
       </div>
     </aside>
   );

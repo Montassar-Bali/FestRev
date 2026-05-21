@@ -2,61 +2,72 @@ import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   FileSpreadsheet,
-  Building2,
+  Layers,
   Download,
   CalendarDays,
   Filter,
   CheckCircle,
+  Ticket
 } from 'lucide-react';
-import { useReservationStore } from '../store/reservationStore';
+import { useTicketStore } from '../store/ticketStore';
 import { exportToExcel } from '../lib/exportExcel';
 import PageWrapper from '../components/layout/PageWrapper';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 
-const roomTypeLabels = {
-  single: 'Single',
-  double: 'Double',
-  triple: 'Triple',
-  quad: 'Quadruple',
-};
-
 export default function Export() {
-  const { hotels, reservations } = useReservationStore();
+  const { tickets, loading } = useTicketStore();
 
-  const [exportMode, setExportMode] = useState('all'); // 'all', 'hotel', 'date'
-  const [selectedHotelId, setSelectedHotelId] = useState('');
+  const [exportMode, setExportMode] = useState('all'); // 'all', 'typology', 'date'
+  const [selectedTypology, setSelectedTypology] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [includeDeleted, setIncludeDeleted] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState(false);
 
-  const filteredReservations = useMemo(() => {
-    let result = [...reservations];
-    if (exportMode === 'hotel' && selectedHotelId) {
-      result = result.filter((r) => r.hotelId === selectedHotelId);
+  // Dynamic list of typologies from the tickets list
+  const typologies = useMemo(() => {
+    const set = new Set(tickets.map((t) => t.typologie).filter(Boolean));
+    return Array.from(set).sort();
+  }, [tickets]);
+
+  const filteredTickets = useMemo(() => {
+    let result = [...tickets];
+
+    // Filter out deleted unless requested
+    if (!includeDeleted) {
+      result = result.filter((t) => t.supprime !== 1);
+    } else {
+      // If including deleted, keep all (both active and deleted)
     }
+
+    if (exportMode === 'typology' && selectedTypology) {
+      result = result.filter((t) => t.typologie === selectedTypology);
+    }
+    
     if (exportMode === 'date') {
       if (dateFrom) {
-        result = result.filter((r) => r.checkIn >= dateFrom);
+        result = result.filter((t) => t.dateCommande >= dateFrom);
       }
       if (dateTo) {
-        result = result.filter((r) => r.checkOut <= dateTo);
+        result = result.filter((t) => t.dateCommande <= dateTo);
       }
     }
     return result;
-  }, [reservations, exportMode, selectedHotelId, dateFrom, dateTo]);
+  }, [tickets, exportMode, selectedTypology, dateFrom, dateTo, includeDeleted]);
 
   const handleExport = async () => {
     setExporting(true);
     setExported(false);
     try {
-      await exportToExcel(filteredReservations, hotels, {
+      await exportToExcel(tickets, {
         mode: exportMode,
-        hotelId: selectedHotelId,
+        typology: selectedTypology,
         dateFrom,
         dateTo,
+        includeDeleted
       });
       setExported(true);
       setTimeout(() => setExported(false), 3000);
@@ -71,22 +82,33 @@ export default function Export() {
     {
       id: 'all',
       label: 'Tout exporter',
-      description: 'Toutes les réservations',
+      description: 'Tous les billets actifs',
       icon: FileSpreadsheet,
     },
     {
-      id: 'hotel',
-      label: 'Par hôtel',
-      description: 'Filtrer par établissement',
-      icon: Building2,
+      id: 'typology',
+      label: 'Par typologie',
+      description: 'Filtrer par type de billet',
+      icon: Layers,
     },
     {
       id: 'date',
-      label: 'Par dates',
-      description: 'Plage de dates',
+      label: 'Par dates de commande',
+      description: 'Plage de dates de commande',
       icon: CalendarDays,
     },
   ];
+
+  if (loading) {
+    return (
+      <PageWrapper id="export-loading-page">
+        <div className="flex-center" style={{ height: '70vh', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <div className="loader" style={{ borderTopColor: 'var(--color-primary)' }} />
+          <p className="text-secondary">Chargement de la base pour l'export...</p>
+        </div>
+      </PageWrapper>
+    );
+  }
 
   return (
     <PageWrapper id="export-page">
@@ -95,7 +117,7 @@ export default function Export() {
         <div>
           <h2 className="section-title">Exporter les Données</h2>
           <p className="section-subtitle">
-            Générer un fichier Excel avec vos réservations
+            Générer un tableur Excel avec vos billets
           </p>
         </div>
 
@@ -122,7 +144,7 @@ export default function Export() {
         </div>
 
         {/* Mode-specific filters */}
-        {exportMode === 'hotel' && (
+        {exportMode === 'typology' && (
           <motion.div
             className="card"
             initial={{ opacity: 0, height: 0 }}
@@ -131,20 +153,20 @@ export default function Export() {
           >
             <div className="flex-row gap-3" style={{ alignItems: 'flex-end' }}>
               <div className="form-group" style={{ flex: 1 }}>
-                <label htmlFor="export-hotel-filter" className="form-label">
+                <label htmlFor="export-typology-filter" className="form-label">
                   <Filter size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-                  Sélectionner un hôtel
+                  Sélectionner la typologie
                 </label>
                 <select
-                  id="export-hotel-filter"
+                  id="export-typology-filter"
                   className="form-select"
-                  value={selectedHotelId}
-                  onChange={(e) => setSelectedHotelId(e.target.value)}
+                  value={selectedTypology}
+                  onChange={(e) => setSelectedTypology(e.target.value)}
                 >
-                  <option value="">Tous les hôtels</option>
-                  {hotels.map((h) => (
-                    <option key={h.id} value={h.id}>
-                      {h.name}
+                  <option value="">Toutes les typologies</option>
+                  {typologies.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
                     </option>
                   ))}
                 </select>
@@ -163,7 +185,7 @@ export default function Export() {
             <div className="form-row">
               <div className="form-group">
                 <label htmlFor="export-date-from" className="form-label">
-                  Date de début
+                  Date de commande de début
                 </label>
                 <input
                   id="export-date-from"
@@ -175,7 +197,7 @@ export default function Export() {
               </div>
               <div className="form-group">
                 <label htmlFor="export-date-to" className="form-label">
-                  Date de fin
+                  Date de commande de fin
                 </label>
                 <input
                   id="export-date-to"
@@ -189,66 +211,88 @@ export default function Export() {
           </motion.div>
         )}
 
+        {/* Global check for deleted tickets */}
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem' }}>
+          <input
+            id="export-include-deleted"
+            type="checkbox"
+            checked={includeDeleted}
+            onChange={(e) => setIncludeDeleted(e.target.checked)}
+            style={{ width: '18px', height: '18px', accentColor: 'var(--color-primary)' }}
+          />
+          <label htmlFor="export-include-deleted" className="text-sm select-none" style={{ cursor: 'pointer', fontWeight: 500 }}>
+            Inclure les billets supprimés (corbeille) dans l'exportation
+          </label>
+        </div>
+
         {/* Preview */}
         <section className="section">
           <div className="section-header">
             <div>
               <h3 className="section-title">Aperçu</h3>
               <p className="section-subtitle">
-                {filteredReservations.length} réservation
-                {filteredReservations.length !== 1 ? 's' : ''} à exporter
+                {filteredTickets.length} billet{filteredTickets.length !== 1 ? 's' : ''} à exporter
               </p>
             </div>
           </div>
 
-          {filteredReservations.length === 0 ? (
+          {filteredTickets.length === 0 ? (
             <EmptyState
               id="export-empty"
-              icon={FileSpreadsheet}
+              icon={Ticket}
               title="Aucune donnée à exporter"
-              message="Ajoutez des réservations ou modifiez vos filtres."
+              message="Ajoutez des billets ou modifiez vos critères de filtrage."
             />
           ) : (
             <div className="data-table-wrapper">
               <table className="data-table" id="export-preview-table">
                 <thead>
                   <tr>
-                    <th>Hôtel</th>
-                    <th>Participants</th>
-                    <th>Type</th>
-                    <th>Catégorie</th>
-                    <th>Check-in</th>
-                    <th>Check-out</th>
+                    <th>Commande / Billet</th>
+                    <th>Typologie / Catégorie</th>
+                    <th>Acheteur</th>
+                    <th>Participant</th>
+                    <th>Prix TTC</th>
+                    <th>Statut</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredReservations.slice(0, 10).map((res) => {
-                    const hotel = hotels.find((h) => h.id === res.hotelId);
-                    return (
-                      <tr key={res.id}>
-                        <td>{hotel?.name || '—'}</td>
-                        <td>
-                          {res.participants
-                            ?.map((p) => `${p.prenom} ${p.nom}`)
-                            .join(', ') || '—'}
-                        </td>
-                        <td>{roomTypeLabels[res.roomType] || res.roomType}</td>
-                        <td>
-                          <Badge category={res.category} />
-                        </td>
-                        <td>{res.checkIn || '—'}</td>
-                        <td>{res.checkOut || '—'}</td>
-                      </tr>
-                    );
-                  })}
+                  {filteredTickets.slice(0, 10).map((t) => (
+                    <tr key={t.id} style={{ opacity: t.supprime === 1 ? 0.65 : 1 }}>
+                      <td>
+                        <div className="flex-col">
+                          <span className="font-medium text-xs">{t.nCommande || '—'}</span>
+                          <span className="text-xs text-secondary">{t.nBillet || '—'}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="flex-col">
+                          <span className="text-xs font-semibold">{t.typologie || '—'}</span>
+                          <span className="text-xs text-secondary">{t.categorieFamille || '—'}</span>
+                        </div>
+                      </td>
+                      <td className="text-xs">{t.prenomAcheteur} {t.nomAcheteur}</td>
+                      <td className="text-xs">{t.prenomParticipant} {t.nomParticipant}</td>
+                      <td className="text-xs font-semibold">
+                        {(Number(t.ttcPrixPaye) || 0).toLocaleString('fr-FR', { style: 'currency', currency: t.devise || 'EUR' })}
+                      </td>
+                      <td>
+                        {t.supprime === 1 ? (
+                          <Badge category="Supprimé" />
+                        ) : (
+                          <Badge category={t.statutBillet} />
+                        )}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-              {filteredReservations.length > 10 && (
+              {filteredTickets.length > 10 && (
                 <p
                   className="text-sm text-secondary"
                   style={{ padding: 'var(--space-4)', textAlign: 'center' }}
                 >
-                  ...et {filteredReservations.length - 10} autres réservations
+                  ...et {filteredTickets.length - 10} autres billets
                 </p>
               )}
             </div>
@@ -263,13 +307,13 @@ export default function Export() {
             size="lg"
             icon={exported ? CheckCircle : Download}
             onClick={handleExport}
-            disabled={exporting || filteredReservations.length === 0}
+            disabled={exporting || filteredTickets.length === 0}
           >
             {exporting
               ? 'Exportation en cours...'
               : exported
               ? 'Exporté avec succès !'
-              : `Exporter ${filteredReservations.length} réservation${filteredReservations.length !== 1 ? 's' : ''}`}
+              : `Exporter ${filteredTickets.length} billet${filteredTickets.length !== 1 ? 's' : ''}`}
           </Button>
         </div>
       </div>

@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function: Check if the user is authenticated and has the admin custom claim
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Helper function: Check if the user is the buyer or participant associated with the ticket
+    function isOwner(resourceData) {
+      return request.auth != null && (
+        request.auth.token.email == resourceData.emailAcheteur || 
+        request.auth.token.email == resourceData.emailParticipant
+      );
+    }
+
+    match /tickets/{ticketId} {
+      // Allow read if the user is an admin OR the buyer/participant of the ticket
+      allow read: if isAdmin() || isOwner(resource.data);
+
+      // Only authenticated admins can write (create, update) or delete tickets
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}

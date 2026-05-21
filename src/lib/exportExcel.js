@@ -1,165 +1,214 @@
-// ─────────────────────────────────────────────
-// FestRev – Excel Export (browser-only, exceljs)
-// ─────────────────────────────────────────────
-
 import ExcelJS from 'exceljs';
 import { EXPORT_OPTIONS } from '../data/constants';
-import { formatDate } from './helpers';
 
 /**
- * Export reservations to a styled .xlsx workbook and trigger a browser download.
- *
- * @param {Array}  reservations  Full reservations array
- * @param {Array}  hotels        Full hotels array
- * @param {Object} options       Optional filters
- * @param {string} options.hotelId     Only include this hotel
- * @param {Object} options.dateRange   { start: ISO, end: ISO }
+ * Helper to generate a thin cell border configuration
  */
-export async function exportToExcel(reservations, hotels, options = {}) {
+function thinBorder() {
+  const side = { style: 'thin', color: { argb: 'D1D5DB' } };
+  return { top: side, left: side, bottom: side, right: side };
+}
+
+/**
+ * Helper to get the status color code
+ */
+function getStatusFillColor(status, colors) {
+  if (status === 'Payé') return colors.statusPaye;
+  if (status === 'En attente') return colors.statusPending;
+  if (status === 'Remboursé') return colors.statusRefunded;
+  return colors.statusStandard;
+}
+
+/**
+ * Export tickets to a styled .xlsx workbook and trigger a browser download.
+ *
+ * @param {Array}  tickets  Full tickets array
+ * @param {Object} options  Optional filters
+ */
+export async function exportToExcel(tickets, options = {}) {
   const { sheetColors, columnHeaders } = EXPORT_OPTIONS;
 
-  // ── Filter reservations ───────────────────
-  let filtered = [...reservations];
+  // ── Filter tickets ───────────────────
+  let filtered = [...tickets];
 
-  if (options.hotelId) {
-    filtered = filtered.filter((r) => r.hotelId === options.hotelId);
+  // Exclude deleted tickets unless specifically asked
+  if (!options.includeDeleted) {
+    filtered = filtered.filter(t => t.supprime !== 1);
   }
 
-  if (options.dateRange) {
-    const start = new Date(options.dateRange.start);
-    const end   = new Date(options.dateRange.end);
-    filtered = filtered.filter((r) => {
-      const ci = new Date(r.checkIn);
-      return ci >= start && ci <= end;
-    });
+  if (options.mode === 'typology' && options.typology) {
+    filtered = filtered.filter((t) => t.typologie === options.typology);
   }
 
-  // ── Determine which hotels to include ─────
-  const relevantHotelIds = new Set(filtered.map((r) => r.hotelId));
-  const relevantHotels = options.hotelId
-    ? hotels.filter((h) => h.id === options.hotelId)
-    : hotels.filter((h) => relevantHotelIds.has(h.id));
+  if (options.mode === 'date') {
+    if (options.dateFrom) {
+      filtered = filtered.filter((t) => t.dateCommande >= options.dateFrom);
+    }
+    if (options.dateTo) {
+      filtered = filtered.filter((t) => t.dateCommande <= options.dateTo);
+    }
+  }
 
   // ── Create workbook ───────────────────────
   const wb = new ExcelJS.Workbook();
   wb.creator = 'FestRev';
   wb.created = new Date();
 
-  for (const hotel of relevantHotels) {
-    const hotelReservations = filtered
-      .filter((r) => r.hotelId === hotel.id)
-      .sort((a, b) => new Date(a.checkIn) - new Date(b.checkIn));
+  // Create one main worksheet
+  const sheetName = 'Billets FestRev';
+  const ws = wb.addWorksheet(sheetName);
 
-    // Sheet name max 31 chars (Excel limit)
-    const sheetName = hotel.name.slice(0, 31);
-    const ws = wb.addWorksheet(sheetName);
+  // ── Title row (merged banner) ───────
+  const totalCols = columnHeaders.length;
+  ws.mergeCells(1, 1, 1, totalCols);
+  const titleCell = ws.getCell('A1');
+  titleCell.value = 'FestRev — Exportation Globale de la Billetterie';
+  titleCell.font = { bold: true, size: 14, color: { argb: sheetColors.titleFont } };
+  titleCell.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: sheetColors.titleBg },
+  };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(1).height = 38;
 
-    // ── Title row (hotel name banner) ───────
-    const totalCols = columnHeaders.length;
-    ws.mergeCells(1, 1, 1, totalCols);
-    const titleCell = ws.getCell('A1');
-    titleCell.value = `${hotel.name}  ${'★'.repeat(hotel.stars)}  —  ${hotel.address}`;
-    titleCell.font = { bold: true, size: 14, color: { argb: sheetColors.titleFont } };
-    titleCell.fill = {
+  // ── Column headers row ──────────────────
+  const headerRow = ws.addRow(columnHeaders);
+  headerRow.height = 26;
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, size: 10, color: { argb: sheetColors.headerFont } };
+    cell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: sheetColors.titleBg },
+      fgColor: { argb: sheetColors.headerBg },
     };
-    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-    ws.getRow(1).height = 36;
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.border = thinBorder();
+  });
 
-    // ── Column headers row ──────────────────
-    const headerRow = ws.addRow(columnHeaders);
-    headerRow.height = 24;
-    headerRow.eachCell((cell) => {
-      cell.font = { bold: true, size: 10, color: { argb: sheetColors.headerFont } };
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: sheetColors.headerBg },
-      };
-      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  // ── Data rows ───────────────────────────
+  filtered.forEach((t, idx) => {
+    const rowData = [
+      t.nBillet || '',
+      t.nCommande || '',
+      t.nCommandeAvance || '',
+      t.typologie || '',
+      t.categorieFamille || '',
+      t.tarif || '',
+      t.codeBarres ? Number(t.codeBarres) : '',
+      Number(t.composte) === 1 ? 'Oui' : 'Non',
+      Number(t.supprime) === 1 ? 'Oui' : 'Non',
+      t.dateCommande || '',
+      t.datePaiement || '',
+      t.origine || '',
+      t.statutBillet || '',
+      Number(t.prixPublic) || 0,
+      Number(t.totalFrais) || 0,
+      t.codeReduction || '',
+      Number(t.reduction) || 0,
+      Number(t.ttcPrixPaye) || 0,
+      Number(t.commission) || 0,
+      Number(t.ttcPrixSansCommission) || 0,
+      Number(t.htPrixPaye) || 0,
+      t.tauxTaxe || '',
+      Number(t.taxe) || 0,
+      t.nomAcheteur || '',
+      t.prenomAcheteur || '',
+      t.emailAcheteur || '',
+      t.mobileAcheteur || '',
+      t.nomParticipant || '',
+      t.prenomParticipant || '',
+      t.emailParticipant || '',
+      t.civiliteParticipant || '',
+      t.dateNaissanceParticipant || '',
+      t.telephoneParticipant || '',
+      t.villeParticipant || '',
+      t.paysParticipant || '',
+      t.dateNuiteeSupplementaire || '',
+      t.referenceFullPass || '',
+      t.factureSociete || '',
+      t.factureTva || '',
+      t.factureAdresse || '',
+      t.factureVille || '',
+      t.facturePays || '',
+      t.informationsComplementaires || ''
+    ];
+
+    const dataRow = ws.addRow(rowData);
+
+    // Style data cell borders & alignments
+    const isAlt = idx % 2 === 1;
+    dataRow.eachCell((cell, colNumber) => {
+      cell.alignment = { vertical: 'middle' };
       cell.border = thinBorder();
-    });
 
-    // ── Data rows ───────────────────────────
-    hotelReservations.forEach((res, idx) => {
-      const extraDesc = (res.extraNights || [])
-        .map((e) => {
-          const pName = res.participants[e.participantIndex];
-          const label = pName ? `${pName.prenom} ${pName.nom}` : `#${e.participantIndex + 1}`;
-          return `${label} (${e.type === 'before' ? 'avant' : 'après'} ${formatDate(e.date)})`;
-        })
-        .join('; ');
-
-      const rowData = [
-        idx + 1,
-        res.roomType,
-        res.category,
-      ];
-
-      // Participants columns (up to 4 × nom + prenom)
-      for (let p = 0; p < 4; p++) {
-        const part = res.participants?.[p];
-        rowData.push(part?.nom ?? '', part?.prenom ?? '');
+      // Number formatting for currencies
+      if ([14, 15, 17, 18, 19, 20, 21, 23].includes(colNumber)) {
+        cell.numFmt = '#,##0.00 €';
+        cell.alignment = { horizontal: 'right', vertical: 'middle' };
       }
 
-      rowData.push(
-        formatDate(res.checkIn),
-        formatDate(res.checkOut),
-        extraDesc || '—',
-        res.notes || '',
-      );
+      // Alternating row background
+      if (isAlt) {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: sheetColors.altRowBg },
+        };
+      }
+    });
 
-      const dataRow = ws.addRow(rowData);
+    // Color code the status cell (column 13: Statut Billet)
+    const statusCell = dataRow.getCell(13);
+    const statusColor = getStatusFillColor(t.statutBillet, sheetColors);
+    statusCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: statusColor },
+    };
+    statusCell.font = { bold: true, size: 9 };
+    statusCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-      // Alternating row color
-      const isAlt = idx % 2 === 1;
-      dataRow.eachCell((cell, colNumber) => {
-        cell.alignment = { vertical: 'middle', wrapText: colNumber === totalCols };
-        cell.border = thinBorder();
-
-        // Default alternating bg
-        if (isAlt) {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: sheetColors.altRowBg },
-          };
-        }
-      });
-
-      // Category cell colour coding (column 3)
-      const catCell = dataRow.getCell(3);
-      const catColor = getCategoryFillColor(res.category, sheetColors);
-      catCell.fill = {
+    // Compost highlight (column 8: Composté)
+    const compostCell = dataRow.getCell(8);
+    if (Number(t.composte) === 1) {
+      compostCell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: catColor },
+        fgColor: { argb: sheetColors.statusPaye }, // green
       };
-      catCell.font = { bold: true, size: 10 };
-    });
+      compostCell.font = { bold: true };
+    }
+  });
 
-    // ── Auto-width columns ──────────────────
-    ws.columns.forEach((col, i) => {
-      let maxLen = columnHeaders[i]?.length ?? 10;
-      col.eachCell?.({ includeEmpty: false }, (cell) => {
-        const len = cell.value ? String(cell.value).length : 0;
+  // ── Auto-fit Columns ──────────────────
+  ws.columns.forEach((col, i) => {
+    let maxLen = columnHeaders[i]?.length ?? 12;
+    col.eachCell?.({ includeEmpty: false }, (cell) => {
+      const val = cell.value;
+      if (val) {
+        // Format strings or numbers length
+        const len = typeof val === 'number' ? 10 : String(val).length;
         if (len > maxLen) maxLen = len;
-      });
-      col.width = Math.min(Math.max(maxLen + 3, 8), 40);
+      }
     });
+    // Give description columns slightly more breathing space
+    col.width = Math.min(Math.max(maxLen + 3, 10), 35);
+  });
 
-    // ── Summary row ─────────────────────────
-    const summaryRowNumber = ws.lastRow.number + 2;
-    ws.mergeCells(summaryRowNumber, 1, summaryRowNumber, 4);
-    const sumCell = ws.getCell(summaryRowNumber, 1);
-    sumCell.value = `Total réservations : ${hotelReservations.length}  |  Participants : ${hotelReservations.reduce((s, r) => s + (r.participants?.length ?? 0), 0)}`;
-    sumCell.font = { bold: true, size: 11, italic: true };
-    sumCell.alignment = { horizontal: 'left' };
-  }
+  // ── Summary row ─────────────────────────
+  const summaryRowNumber = ws.lastRow.number + 2;
+  ws.mergeCells(summaryRowNumber, 1, summaryRowNumber, 6);
+  const sumCell = ws.getCell(summaryRowNumber, 1);
+  
+  const totalRev = filtered.reduce((s, t) => s + (Number(t.ttcPrixPaye) || 0), 0);
+  const compostCount = filtered.filter(t => Number(t.composte) === 1).length;
+  
+  sumCell.value = `Total Billets : ${filtered.length}  |  Scannés/Compostés : ${compostCount}  |  Revenus : ${totalRev.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}`;
+  sumCell.font = { bold: true, size: 11, italic: true };
+  sumCell.alignment = { horizontal: 'left', vertical: 'middle' };
 
-  // ── Trigger download ──────────────────────
+  // ── Trigger browser download ──────────────────────
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -182,21 +231,4 @@ export async function exportToExcel(reservations, hotels, options = {}) {
   }, 100);
 
   return fileName;
-}
-
-// ── Internal helpers ────────────────────────
-
-function thinBorder() {
-  const side = { style: 'thin', color: { argb: 'D1D5DB' } };
-  return { top: side, left: side, bottom: side, right: side };
-}
-
-function getCategoryFillColor(category, colors) {
-  const map = {
-    VIP:          colors.categoryVIP,
-    Artiste:      colors.categoryArtiste,
-    Organisation: colors.categoryOrganisation,
-    Standard:     colors.categoryStandard,
-  };
-  return map[category] ?? colors.categoryStandard;
 }

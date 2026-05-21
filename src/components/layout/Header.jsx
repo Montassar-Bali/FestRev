@@ -4,8 +4,7 @@ import { Search, Menu } from 'lucide-react';
 
 const routeTitles = {
   '/': 'Tableau de Bord',
-  '/reservations': 'Réservations',
-  '/hotels': 'Hôtels',
+  '/tickets': 'Billets',
   '/export': 'Exporter',
 };
 

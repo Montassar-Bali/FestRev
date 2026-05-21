@@ -5,6 +5,12 @@ const categoryMap = {
   Artiste: 'badge-artist',
   Organisation: 'badge-org',
   Standard: 'badge-standard',
+  'Payé': 'badge-success',
+  'En attente': 'badge-warning',
+  'Remboursé': 'badge-danger',
+  'Supprimé': 'badge-danger',
+  'Composté': 'badge-success',
+  'Non composté': 'badge-standard',
 };
 
 export default function Badge({ category, className = '', id }) {

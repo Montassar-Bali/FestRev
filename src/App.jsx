@@ -4,8 +4,7 @@ import { AnimatePresence } from 'framer-motion';
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
 import Dashboard from './pages/Dashboard';
-import Reservations from './pages/Reservations';
-import Hotels from './pages/Hotels';
+import Tickets from './pages/Tickets';
 import Export from './pages/Export';
 
 function AnimatedRoutes() {
@@ -15,8 +14,7 @@ function AnimatedRoutes() {
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/reservations" element={<Reservations />} />
-        <Route path="/hotels" element={<Hotels />} />
+        <Route path="/tickets" element={<Tickets />} />
         <Route path="/export" element={<Export />} />
       </Routes>
     </AnimatePresence>
