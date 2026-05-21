@@ -3,7 +3,8 @@
 // ─────────────────────────────────────────────
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { ref, onValue, set, update, remove } from 'firebase/database';
+import { db } from '../lib/firebase';
 import { DEFAULT_HOTELS } from '../data/constants';
 
 // ── Seed helpers ──────────────────────────────
@@ -214,104 +215,116 @@ function buildSeedReservations(hotels) {
   ];
 }
 
-// ── Initial state builder ─────────────────────
-
-function buildInitialState() {
-  const hotels = buildSeedHotels();
-  const reservations = buildSeedReservations(hotels);
-  return { hotels, reservations };
-}
-
 // ── Store ─────────────────────────────────────
 
-const useReservationStore = create(
-  persist(
-    (set, get) => ({
-      ...buildInitialState(),
+const useReservationStore = create((set, get) => ({
+  hotels: [],
+  reservations: [],
 
-      // ─── Hotel actions ──────────────────
-      addHotel: (hotel) =>
-        set((state) => ({
-          hotels: [...state.hotels, { id: crypto.randomUUID(), ...hotel }],
-        })),
+  // ─── Hotel actions ──────────────────
+  addHotel: async (hotel) => {
+    const newId = crypto.randomUUID();
+    await set(ref(db, `hotels/${newId}`), { id: newId, ...hotel });
+  },
 
-      updateHotel: (id, data) =>
-        set((state) => ({
-          hotels: state.hotels.map((h) =>
-            h.id === id ? { ...h, ...data } : h,
-          ),
-        })),
+  updateHotel: async (id, data) => {
+    await update(ref(db, `hotels/${id}`), data);
+  },
 
-      deleteHotel: (id) =>
-        set((state) => ({
-          hotels: state.hotels.filter((h) => h.id !== id),
-          reservations: state.reservations.filter((r) => r.hotelId !== id),
-        })),
+  deleteHotel: async (id) => {
+    // Delete the hotel itself
+    await remove(ref(db, `hotels/${id}`));
+    // Also delete any reservations associated with this hotel
+    const reservations = get().reservations;
+    const associatedReservations = reservations.filter((r) => r.hotelId === id);
+    for (const r of associatedReservations) {
+      await remove(ref(db, `reservations/${r.id}`));
+    }
+  },
 
-      // ─── Reservation actions ────────────
-      addReservation: (reservation) =>
-        set((state) => ({
-          reservations: [
-            ...state.reservations,
-            {
-              id: crypto.randomUUID(),
-              createdAt: new Date().toISOString(),
-              ...reservation,
-            },
-          ],
-        })),
+  // ─── Reservation actions ────────────
+  addReservation: async (reservation) => {
+    const newId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    await set(ref(db, `reservations/${newId}`), {
+      id: newId,
+      createdAt,
+      ...reservation,
+    });
+  },
 
-      updateReservation: (id, data) =>
-        set((state) => ({
-          reservations: state.reservations.map((r) =>
-            r.id === id ? { ...r, ...data } : r,
-          ),
-        })),
+  updateReservation: async (id, data) => {
+    await update(ref(db, `reservations/${id}`), data);
+  },
 
-      deleteReservation: (id) =>
-        set((state) => ({
-          reservations: state.reservations.filter((r) => r.id !== id),
-        })),
+  deleteReservation: async (id) => {
+    await remove(ref(db, `reservations/${id}`));
+  },
 
-      // ─── Selectors / computed ───────────
-      getReservationsByHotel: (hotelId) => {
-        return get().reservations.filter((r) => r.hotelId === hotelId);
-      },
+  // ─── Selectors / computed ───────────
+  getReservationsByHotel: (hotelId) => {
+    return get().reservations.filter((r) => r.hotelId === hotelId);
+  },
 
-      getStats: () => {
-        const { reservations, hotels } = get();
-        return {
-          totalReservations: reservations.length,
-          totalParticipants: reservations.reduce(
-            (sum, r) => sum + (r.participants?.length ?? 0),
-            0,
-          ),
-          totalHotels: hotels.length,
-          vipCount: reservations.filter((r) => r.category === 'VIP').length,
-          confirmedCount: reservations.filter(
-            (r) => r.status === 'Confirmée',
-          ).length,
-          pendingCount: reservations.filter(
-            (r) => r.status === 'En attente',
-          ).length,
-          cancelledCount: reservations.filter(
-            (r) => r.status === 'Annulée',
-          ).length,
-          artisteCount: reservations.filter(
-            (r) => r.category === 'Artiste',
-          ).length,
-          organisationCount: reservations.filter(
-            (r) => r.category === 'Organisation',
-          ).length,
-        };
-      },
-    }),
-    {
-      name: 'festrev-reservations',   // localStorage key
-      version: 1,
-    },
-  ),
-);
+  getStats: () => {
+    const { reservations, hotels } = get();
+    return {
+      totalReservations: reservations.length,
+      totalParticipants: reservations.reduce(
+        (sum, r) => sum + (r.participants?.length ?? 0),
+        0,
+      ),
+      totalHotels: hotels.length,
+      vipCount: reservations.filter((r) => r.category === 'VIP').length,
+      confirmedCount: reservations.filter(
+        (r) => r.status === 'Confirmée',
+      ).length,
+      pendingCount: reservations.filter(
+        (r) => r.status === 'En attente',
+      ).length,
+      cancelledCount: reservations.filter(
+        (r) => r.status === 'Annulée',
+      ).length,
+      artisteCount: reservations.filter(
+        (r) => r.category === 'Artiste',
+      ).length,
+      organisationCount: reservations.filter(
+        (r) => r.category === 'Organisation',
+      ).length,
+    };
+  },
+}));
+
+// Listen to Firebase and sync changes to Zustand
+onValue(ref(db), (snapshot) => {
+  const data = snapshot.val();
+  if (!data || (!data.hotels && !data.reservations)) {
+    // Database is empty, seed it!
+    const hotels = buildSeedHotels();
+    const reservations = buildSeedReservations(hotels);
+
+    const hotelsObj = {};
+    hotels.forEach((h) => {
+      hotelsObj[h.id] = h;
+    });
+
+    const reservationsObj = {};
+    reservations.forEach((r) => {
+      reservationsObj[r.id] = r;
+    });
+
+    set(ref(db), {
+      hotels: hotelsObj,
+      reservations: reservationsObj,
+    });
+  } else {
+    // Map objects back to arrays
+    const hotels = data.hotels ? Object.values(data.hotels) : [];
+    const reservations = data.reservations ? Object.values(data.reservations) : [];
+    
+    useReservationStore.setState({ hotels, reservations });
+  }
+});
 
 export { useReservationStore };
 export default useReservationStore;
