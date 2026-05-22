@@ -74,6 +74,7 @@ export default function Scanner() {
   const scannerRef = useRef(null);
   const scannerInstanceRef = useRef(null);
   const cooldownRef = useRef(false);
+  const lastScannedCodeRef = useRef(null);
 
   // ── Stats derived from session history ──
   const sessionStats = {
@@ -181,13 +182,23 @@ export default function Scanner() {
   // ── Process a scanned code ──
   const processCode = useCallback(
     async (code) => {
+      if (!code) return;
+      const trimmedCode = code.trim();
+
+      // Block if still in cooldown
       if (cooldownRef.current) return;
+
+      // Block if this is the same code as the last scan (camera keeps reading it)
+      if (lastScannedCodeRef.current === trimmedCode) return;
+
+      // Lock: set cooldown and remember this code
       cooldownRef.current = true;
+      lastScannedCodeRef.current = trimmedCode;
       setTimeout(() => {
         cooldownRef.current = false;
-      }, 1500);
+      }, 3000);
 
-      const ticket = findTicketByCode(code);
+      const ticket = findTicketByCode(trimmedCode);
       const now = new Date().toLocaleTimeString('fr-FR', {
         hour: '2-digit',
         minute: '2-digit',
@@ -195,7 +206,7 @@ export default function Scanner() {
       });
 
       if (!ticket) {
-        const result = { status: STATUS.NOT_FOUND, code, time: now, ticket: null };
+        const result = { status: STATUS.NOT_FOUND, code: trimmedCode, time: now, ticket: null };
         setScanResult(result);
         setHistory((prev) => [result, ...prev]);
         if (soundEnabled) playBeep('error');
@@ -203,7 +214,7 @@ export default function Scanner() {
       }
 
       if (Number(ticket.composte) === 1) {
-        const result = { status: STATUS.ALREADY, code, time: now, ticket };
+        const result = { status: STATUS.ALREADY, code: trimmedCode, time: now, ticket };
         setScanResult(result);
         setHistory((prev) => [result, ...prev]);
         if (soundEnabled) playBeep('already');
@@ -212,7 +223,7 @@ export default function Scanner() {
 
       // Check-in the ticket
       await toggleCompost(ticket.id, 0);
-      const result = { status: STATUS.SUCCESS, code, time: now, ticket };
+      const result = { status: STATUS.SUCCESS, code: trimmedCode, time: now, ticket };
       setScanResult(result);
       setHistory((prev) => [result, ...prev]);
       if (soundEnabled) playBeep('success');
@@ -285,13 +296,17 @@ export default function Scanner() {
   const handleManualSubmit = (e) => {
     e.preventDefault();
     if (manualCode.trim()) {
+      lastScannedCodeRef.current = null; // Allow manual re-check of same code
       processCode(manualCode.trim());
       setManualCode('');
     }
   };
 
-  // ── Clear results ──
-  const clearResult = () => setScanResult(null);
+  // ── Clear results (also unlocks re-scanning the same code) ──
+  const clearResult = () => {
+    lastScannedCodeRef.current = null;
+    setScanResult(null);
+  };
 
   // ── Result card config ──
   const getResultConfig = (status) => {
