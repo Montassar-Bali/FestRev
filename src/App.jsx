@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Tickets from './pages/Tickets';
 import Export from './pages/Export';
 import Import from './pages/Import';
+import Scanner from './pages/Scanner';
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -16,6 +17,7 @@ function AnimatedRoutes() {
       <Routes location={location} key={location.pathname}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/tickets" element={<Tickets />} />
+        <Route path="/scanner" element={<Scanner />} />
         <Route path="/export" element={<Export />} />
         <Route path="/admin" element={<Import />} />
       </Routes>

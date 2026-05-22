@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import {
   LayoutDashboard,
   Ticket,
+  ScanLine,
   FileSpreadsheet,
   ShieldCheck,
 } from 'lucide-react';
@@ -10,6 +11,7 @@ import {
 const navItems = [
   { to: '/', label: 'Tableau de Bord', icon: LayoutDashboard },
   { to: '/tickets', label: 'Billets', icon: Ticket },
+  { to: '/scanner', label: 'Scanner', icon: ScanLine },
   { to: '/export', label: 'Exporter', icon: FileSpreadsheet },
   { to: '/admin', label: 'Admin (CSV)', icon: ShieldCheck },
 ];
