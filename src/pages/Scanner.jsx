@@ -83,27 +83,99 @@ export default function Scanner() {
     notFound: history.filter((h) => h.status === STATUS.NOT_FOUND).length,
   };
 
-  // ── Lookup logic: match scanned code against nCommande or nBillet ──
+  // ── Extract meaningful code(s) from QR content ──
+  // Weezevent QR codes may contain a URL, a barcode number, or a raw code
+  const extractCodes = useCallback((raw) => {
+    if (!raw) return [];
+    const trimmed = raw.trim();
+    const candidates = [trimmed];
+
+    // If it's a URL, extract path segments and query params as candidates
+    try {
+      const url = new URL(trimmed);
+      // Add each non-empty path segment
+      url.pathname.split('/').forEach((seg) => {
+        if (seg && seg.length > 3) candidates.push(seg);
+      });
+      // Add query parameter values
+      url.searchParams.forEach((val) => {
+        if (val && val.length > 3) candidates.push(val);
+      });
+    } catch {
+      // Not a URL — that's fine
+    }
+
+    // Strip common Weezevent URL prefixes if present
+    const urlPrefixes = ['https://weezevent.com/', 'https://tickets.weezevent.com/', 'http://weezevent.com/'];
+    urlPrefixes.forEach((prefix) => {
+      if (trimmed.toLowerCase().startsWith(prefix)) {
+        const rest = trimmed.slice(prefix.length).replace(/\//g, '');
+        if (rest.length > 3) candidates.push(rest);
+      }
+    });
+
+    // Deduplicate
+    return [...new Set(candidates)];
+  }, []);
+
+  // ── Key fields to prioritize for matching ──
+  const PRIORITY_FIELDS = [
+    'nCommande', 'nCommandeAvance', 'nBillet', 'codeBarres',
+    'ticketsNumber', 'id',
+  ];
+
+  // ── Lookup logic: match scanned code against ALL ticket fields ──
   const findTicketByCode = useCallback(
     (code) => {
       if (!code) return null;
-      const trimmed = code.trim();
+      const candidates = extractCodes(code);
+      if (candidates.length === 0) return null;
 
-      return tickets.find((t) => {
-        const nCmd = (t.nCommande || '').trim();
-        const nCmdAdv = (t.nCommandeAvance || '').trim();
-        const nBillet = (t.nBillet || '').trim();
-        const barcode = String(t.codeBarres || '').trim();
+      // PASS 1: Exact match on priority fields
+      for (const candidate of candidates) {
+        const found = tickets.find((t) => {
+          for (const field of PRIORITY_FIELDS) {
+            const val = String(t[field] ?? '').trim();
+            if (val && val === candidate) return true;
+          }
+          return false;
+        });
+        if (found) return found;
+      }
 
-        return (
-          nCmd === trimmed ||
-          nCmdAdv === trimmed ||
-          nBillet === trimmed ||
-          barcode === trimmed
-        );
-      });
+      // PASS 2: Exact match on ANY string field in the ticket object
+      // (catches raw Excel column names that weren't mapped to schema fields)
+      for (const candidate of candidates) {
+        const found = tickets.find((t) => {
+          return Object.values(t).some((val) => {
+            if (val === null || val === undefined) return false;
+            const strVal = String(val).trim();
+            return strVal && strVal === candidate;
+          });
+        });
+        if (found) return found;
+      }
+
+      // PASS 3: Contained match — the scanned code contains a ticket identifier
+      // or a ticket identifier contains the scanned code
+      // Only for candidates that look like identifiers (6+ chars, alphanumeric)
+      for (const candidate of candidates) {
+        if (candidate.length < 6) continue;
+        const found = tickets.find((t) => {
+          for (const field of PRIORITY_FIELDS) {
+            const val = String(t[field] ?? '').trim();
+            if (val && val.length >= 6) {
+              if (candidate.includes(val) || val.includes(candidate)) return true;
+            }
+          }
+          return false;
+        });
+        if (found) return found;
+      }
+
+      return null;
     },
-    [tickets]
+    [tickets, extractCodes]
   );
 
   // ── Process a scanned code ──
@@ -501,6 +573,14 @@ export default function Scanner() {
                     <p className="text-sm" style={{ color: 'var(--color-danger)', padding: '0 var(--space-5) var(--space-5)' }}>
                       {scanResult.errorMessage}
                     </p>
+                  )}
+
+                  {scanResult.status === STATUS.NOT_FOUND && (
+                    <div style={{ padding: '0 var(--space-6) var(--space-5)' }}>
+                      <p className="text-xs" style={{ color: 'var(--color-text-tertiary)', fontFamily: "'SF Mono', 'Cascadia Code', monospace", wordBreak: 'break-all', background: 'rgba(255,255,255,0.02)', padding: 'var(--space-3)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
+                        Donnée QR brute : {scanResult.code}
+                      </p>
+                    </div>
                   )}
                 </motion.div>
               ) : (
